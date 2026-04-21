@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anaconda Snake Game</title>
+<style>
+body { font-family: Arial; text-align: center; background: radial-gradient(circle,#020024,#090979,#000); color:#00f7ff; }
+h1 { text-shadow:0 0 10px #00f7ff; }
+canvas { background:#000; display:block; margin:15px auto; border-radius:12px; border:3px solid #ff0033; }
+#gameOverScreen { position:fixed; inset:0; background:rgba(0,0,0,0.95); display:none; justify-content:center; align-items:center; flex-direction:column; color:#ff0055; font-size:32px; z-index:9999; }
+button, select { margin:5px; padding:8px; }
+.small {font-size:14px;color:#aaa}
+</style>
+</head>
+<body>
+<h1>Anaconda 🐍</h1>
+
+<select id="difficulty">
+<option value="easy">Easy</option>
+<option value="medium">Medium</option>
+<option value="hard">Hard</option>
+</select>
+
+<select id="skin"></select>
+
+<button onclick="startGame()">Start</button>
+<button onclick="toggleAI(event)">AI: OFF</button>
+
+<canvas id="game" width="400" height="400"></canvas>
+
+<h2>Score: <span id="score">0</span></h2>
+<h3>High Score: <span id="high">0</span></h3>
+<button onclick="resetHighScore()">Reset High Score</button>
+<div class="small">Level: <span id="level">1</span> | Target: <span id="target">10</span></div>
+<div class="small">Top Scores: <span id="board"></span></div>
+
+<div id="gameOverScreen" onclick="restartGame()">
+    <div>GAME OVER</div>
+    <div id="finalScore"></div>
+    <div class="small">Click anywhere or press R to restart</div>
+</div>
+
+<script>
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const grid=20;
+let snake, direction, food, banana, score, gameInterval, obstacles;
+let speed, skin='neon', trail=[];
+let ai=false;
+let playerUsedInput=false;
+let assistedMode=false;
+let level=1, target=10;
+
+function toggleAI(e){ 
+ ai=!ai; 
+ e.target.textContent='AI: '+(ai?'ON':'OFF');
+ if(ai && playerUsedInput) assistedMode=true;
+}
+
+let highScore=+localStorage.getItem('highScore')||0;
+let unlocked=JSON.parse(localStorage.getItem('skins'))||['neon'];
+let leaderboard=JSON.parse(localStorage.getItem('board'))||[];
+document.getElementById('high').textContent=highScore;
+
+const skins={
+ neon:{unlock:0}, rainbow:{unlock:5}, fire:{unlock:8}, ice:{unlock:12}, gold:{unlock:18}, matrix:{unlock:25},
+ plasma:{unlock:30}, shadow:{unlock:35}, ocean:{unlock:40}, lava:{unlock:45}, galaxy:{unlock:50}
+};
+
+function renderSkinMenu(){
+ const select=document.getElementById('skin'); select.innerHTML='';
+ Object.keys(skins).forEach(s=>{
+  let opt=document.createElement('option'); opt.value=s;
+  if(unlocked.includes(s)) opt.textContent=s;
+  else { opt.textContent=s+" 🔒("+skins[s].unlock+")"; opt.disabled=true; }
+  select.appendChild(opt);
+ });
+}
+
+function renderBoard(){
+ document.getElementById('board').textContent = leaderboard.slice(0,5).join(' | ')||'—';
+}
+renderSkinMenu(); renderBoard();
+
+function startGame(){
+ snake=[{x:10,y:10},{x:9,y:10},{x:8,y:10}];
+ direction='right'; score=0; obstacles=[]; banana=null; trail=[];
+ skin=document.getElementById('skin').value;
+ level=1; target=10;
+ document.getElementById('score').textContent=score;
+ document.getElementById('level').textContent=level;
+ document.getElementById('target').textContent=target;
+ hideGameOver();
+
+ let diff=document.getElementById('difficulty').value;
+ speed=diff==='easy'?300:diff==='medium'?180:120;
+ if(diff==='hard') generateObstacles();
+ spawnFood();
+ clearInterval(gameInterval);
+ gameInterval=setInterval(update,speed);
+}
+
+function restartGame(){ hideGameOver(); startGame(); }
+
+function generateObstacles(){
+ for(let i=0;i<10;i++){
+  let pos;
+  do{pos={x:rand(),y:rand()};}while(collides(pos));
+  obstacles.push(pos);
+ }
+}
+
+function rand(){return Math.floor(Math.random()*20);} 
+function collides(p){return snake.some(s=>s.x===p.x&&s.y===p.y)||obstacles.some(o=>o.x===p.x&&o.y===p.y);} 
+
+function spawnFood(){
+ do{food={x:rand(),y:rand()};}while(collides(food));
+ if(Math.random()<0.1){
+  do{banana={x:rand(),y:rand()};}while(collides(banana));
+ } else banana=null;
+}
+
+function safe(dir, head){
+ let nx=head.x+(dir==='right'?1:dir==='left'?-1:0);
+ let ny=head.y+(dir==='down'?1:dir==='up'?-1:0);
+ if(nx<0||ny<0||nx>=20||ny>=20) return false;
+ if(snake.some(s=>s.x===nx&&s.y===ny)) return false;
+ if(obstacles.some(o=>o.x===nx&&o.y===ny)) return false;
+ return true;
+}
+
+function aiMove(){
+ let head=snake[0];
+ let prefs=[];
+ if(food.x<head.x) prefs.push('left');
+ if(food.x>head.x) prefs.push('right');
+ if(food.y<head.y) prefs.push('up');
+ if(food.y>head.y) prefs.push('down');
+ for(let d of prefs){ if(safe(d, head)){ direction=d; return;} }
+ for(let d of ['up','right','down','left']){ if(safe(d, head)){ direction=d; return;} }
+}
+
+function update(){
+ if(ai) aiMove();
+ let head={...snake[0]};
+ if(direction==='up')head.y--;
+ if(direction==='down')head.y++;
+ if(direction==='left')head.x--;
+ if(direction==='right')head.x++;
+
+ if(head.x<0||head.y<0||head.x>=20||head.y>=20||snake.some(s=>s.x===head.x&&s.y===head.y)||obstacles.some(o=>o.x===head.x&&o.y===head.y)){
+   explosion(head); return;
+ }
+
+ snake.unshift(head);
+ trail.push({...head}); if(trail.length>2)trail.shift();
+
+ if(head.x===food.x&&head.y===food.y){score++; spawnFood();}
+ else if(banana&&head.x===banana.x&&head.y===banana.y){
+  let grow=Math.floor(snake.length*0.5);
+  for(let i=0;i<grow;i++)snake.push({...snake[snake.length-1]});
+  score+=2; spawnFood();
+ } else snake.pop();
+
+ levelUp(); unlock();
+ document.getElementById('score').textContent=score;
+ draw();
+}
+
+function levelUp(){
+ if(score>=target){
+  level++; target+=10;
+  document.getElementById('level').textContent=level;
+  document.getElementById('target').textContent=target;
+  speed=Math.max(60, speed-10);
+  clearInterval(gameInterval);
+  gameInterval=setInterval(update,speed);
+ }
+}
+
+function unlock(){
+ if(ai || assistedMode) return;
+ Object.keys(skins).forEach(s=>{ 
+  if(score>=skins[s].unlock && !unlocked.includes(s)){
+    unlocked.push(s);
+    localStorage.setItem('skins',JSON.stringify(unlocked));
+    renderSkinMenu();
+  }
+ });
+}
+
+let particles=[];
+function explosion(pos){
+ clearInterval(gameInterval);
+ for(let i=0;i<25;i++){
+  particles.push({x:pos.x*grid,y:pos.y*grid,vx:Math.random()*4-2,vy:Math.random()*4-2});
+ }
+ let anim=setInterval(()=>{
+  ctx.fillStyle='rgba(0,0,0,0.2)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  particles.forEach(p=>{
+   p.x+=p.vx;
+   p.y+=p.vy;
+   ctx.fillStyle='red';
+   ctx.fillRect(p.x,p.y,4,4);
+  });
+ },30);
+ setTimeout(()=>{
+  clearInterval(anim);
+  particles=[];
+  gameOver();
+ },450);
+}
+
+function draw(){
+ ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+ trail.forEach((t,i)=>{
+  ctx.fillStyle='rgba(0,255,159,'+(i/2)+')';
+  ctx.fillRect(t.x*grid,t.y*grid,grid-2,grid-2);
+ });
+
+ snake.forEach((s,i)=>{
+  if(skin==='neon') ctx.fillStyle='#00ff9f';
+  else if(skin==='rainbow') ctx.fillStyle=`hsl(${(i*25 + Date.now()/10)%360},100%,50%)`;
+  else if(skin==='fire') ctx.fillStyle=`rgb(255,${(i*12 + Date.now()/50)%255},0)`;
+  else if(skin==='ice') ctx.fillStyle=`rgb(0,${150+(i*5)},${(200+Math.sin(Date.now()/200)*55)})`;
+  else if(skin==='gold') ctx.fillStyle=`hsl(45,100%,${60+Math.sin(Date.now()/200)*20}%)`;
+  else if(skin==='matrix') ctx.fillStyle=`hsl(120,100%,${50+Math.sin(Date.now()/100)*20}%)`;
+  else if(skin==='plasma') ctx.fillStyle=`hsl(${Date.now()/5%360},100%,60%)`;
+  else if(skin==='shadow') ctx.fillStyle='#222';
+  else if(skin==='ocean') ctx.fillStyle=`rgb(0,${100+Math.sin(Date.now()/200)*100},255)`;
+  else if(skin==='lava') ctx.fillStyle=`rgb(255,${Math.sin(Date.now()/100)*200},0)`;
+  else if(skin==='galaxy') ctx.fillStyle=`hsl(${(i*50 + Date.now()/20)%360},100%,70%)`;
+  ctx.fillRect(s.x*grid,s.y*grid,grid-2,grid-2);
+ });
+
+ ctx.fillStyle='#ff0055'; ctx.fillRect(food.x*grid,food.y*grid,grid-2,grid-2);
+ if(banana){ ctx.fillStyle='#fff700'; ctx.fillRect(banana.x*grid,banana.y*grid,grid-2,grid-2);} 
+ ctx.fillStyle='#ff00ff'; obstacles.forEach(o=>ctx.fillRect(o.x*grid,o.y*grid,grid-2,grid-2));
+}
+
+let sx, sy;
+canvas.addEventListener('touchstart',e=>{ sx=e.touches[0].clientX; sy=e.touches[0].clientY; });
+canvas.addEventListener('touchend',e=>{
+ let dx=e.changedTouches[0].clientX-sx;
+ let dy=e.changedTouches[0].clientY-sy;
+ direction = Math.abs(dx)>Math.abs(dy) ? (dx>0?'right':'left') : (dy>0?'down':'up');
+});
+
+document.addEventListener('keydown',e=>{
+ playerUsedInput = true;
+ if(ai) assistedMode = true;
+ const k=e.key.toLowerCase();
+ if(k==='r') restartGame();
+ if(k==='arrowup'||k==='w')direction='up';
+ else if(k==='arrowdown'||k==='s')direction='down';
+ else if(k==='arrowleft'||k==='a')direction='left';
+ else if(k==='arrowright'||k==='d')direction='right';
+});
+
+function gameOver(){
+ if(!ai && !assistedMode && score>highScore){ 
+  highScore=score; 
+  localStorage.setItem('highScore',highScore);
+ }
+
+ leaderboard.push(score); 
+ leaderboard.sort((a,b)=>b-a); 
+ leaderboard=leaderboard.slice(0,10);
+ localStorage.setItem('board', JSON.stringify(leaderboard)); 
+ renderBoard();
+
+ document.getElementById('high').textContent=highScore;
+
+ let modeText = ai ? 'AI MODE (No Rewards)' : assistedMode ? 'ASSISTED MODE (No Rewards)' : 'PLAYER MODE';
+ document.getElementById('finalScore').textContent='Score: '+score+' | '+modeText;
+
+ document.getElementById('gameOverScreen').style.display='flex';
+}
+
+function hideGameOver(){ document.getElementById('gameOverScreen').style.display='none'; }
+
+// 🔄 Reset High Score
+function resetHighScore(){
+ highScore = 0;
+ localStorage.setItem('highScore', 0);
+ document.getElementById('high').textContent = 0;
+}
+</script>
+</body>
+</html>
